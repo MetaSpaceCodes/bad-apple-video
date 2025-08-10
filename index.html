@@ -186,113 +186,56 @@
           try {
             const id = ctx.getImageData(mouseX, mouseY, 1, 1).data;
             const r = id[0], g = id[1], b = id[2];
-            const brightness = (r + g + b) / 3; // 0..255
+            const brightness = (r + g + b) / (255 * 3); // 0=black,1=white approx
 
-            if (selectedIsWhite) {
-              const similarity = brightness / 255; // 1 if white
-              opposition = 1 - similarity; // 1 if black
-            } else {
-              const similarity = 1 - (brightness / 255); // 1 if black
-              opposition = 1 - similarity; // 1 if white
-            }
+            // For white selection, opposition = how dark pixel is (1 - brightness)
+            // For black selection, opposition = how bright pixel is (brightness)
+            opposition = selectedIsWhite ? (1 - brightness) : brightness;
 
-            // clamp
-            opposition = Math.max(0, Math.min(1, opposition));
-            oppositionPct.textContent = Math.round(opposition * 100) + '%';
-
+            // Draw a small circle around mouse to visualize match
+            ctx.beginPath();
+            ctx.strokeStyle = opposition > 0.5 ? 'red' : 'lime';
+            ctx.lineWidth = 2;
+            ctx.arc(mouseX + 0.5, mouseY + 0.5, 8, 0, Math.PI * 2);
+            ctx.stroke();
           } catch (err) {
-            // getImageData can throw if canvas is tainted by cross-origin video.
-            console.error('getImageData failed (probably CORS):', err);
-            oppositionPct.textContent = 'N/A';
+            // Sometimes getImageData throws if video not ready
+            console.warn('getImageData failed', err);
           }
         }
 
-        // Damage proportional to opposition and time
-        const damage = maxDamagePerSecond * opposition * dt;
-        health -= damage;
-        health = Math.max(0, health);
+        // Update health: damage proportional to opposition * maxDamagePerSecond * dt
+        health -= opposition * maxDamagePerSecond * dt;
+        health = Math.min(maxHealth, Math.max(0, health));
 
         // Update UI health bar
-        const healthPct = (health / maxHealth) * 100;
-        healthBar.style.width = healthPct + '%';
-        // color shift from green -> yellow -> red
-        if (healthPct > 60) {
-          healthBar.style.background = 'linear-gradient(90deg,#6ee7b7,#16a34a)';
-        } else if (healthPct > 30) {
-          healthBar.style.background = 'linear-gradient(90deg,#facc15,#f97316)';
-        } else {
-          healthBar.style.background = 'linear-gradient(90deg,#f87171,#ef4444)';
-        }
+        healthBar.style.transform = `scaleX(${health / maxHealth})`;
 
-        // check lose condition
+        // Update opposition % UI
+        oppositionPct.textContent = Math.round(opposition * 100) + '%';
+
+        // Check game over/win conditions
         if (health <= 0) {
-          endGame(false);
-          return;
-        }
-
-        // check win condition: end of video reached
-        if (video.ended || video.currentTime >= video.duration - 0.05) {
-          endGame(true);
-          return;
+          endGame(false, "You lost! Try again?");
+        } else if (video.ended) {
+          endGame(true, "You win! Bad Apple conquered!");
         }
       }
 
-      // continue
-      requestAnimationFrame(loop);
+      if (isPlaying) requestAnimationFrame(loop);
     }
 
-    // End game display
-    function endGame(won) {
+    // End game
+    function endGame(win, msg) {
       isPlaying = false;
       video.pause();
       centerOverlay.style.display = 'flex';
-      if (won) {
-        messageBox.innerHTML = `<div style="font-size:34px; font-weight:700; margin-bottom:8px;">YOU WIN!</div><div style="font-size:20px;">Score (health): ${Math.round(health)}/${maxHealth}</div><div style="margin-top:10px; font-size:14px; opacity:0.9;">Press R to restart</div>`;
-      } else {
-        messageBox.innerHTML = `<div style="font-size:34px; font-weight:700; margin-bottom:8px;">YOU LOSE</div><div style="font-size:20px;">Health reached 0</div><div style="margin-top:10px; font-size:14px; opacity:0.9;">Press R to restart</div>`;
-      }
-
-      // allow restart with R
-      function onKey(e) {
-        if (e.key.toLowerCase() === 'r') {
-          window.removeEventListener('keydown', onKey);
-          restartGame();
-        }
-      }
-      window.addEventListener('keydown', onKey);
-    }
-
-    function restartGame() {
-      centerOverlay.style.display = 'none';
+      messageBox.textContent = msg;
+      startBtn.style.display = 'block';
       health = maxHealth;
-      healthBar.style.width = '100%';
+      healthBar.style.transform = 'scaleX(1)';
       oppositionPct.textContent = '0%';
-      video.currentTime = 0;
-      video.play().then(() => { isPlaying = true; lastTime = performance.now(); requestAnimationFrame(loop); }).catch(() => {});
     }
-
-    // Defensive: if getImageData throws due to cross-origin video, provide fallback damage based on average brightness of full canvas
-    // (This fallback will sample a small area instead of a single pixel.)
-
-    // NOTES: If your Video.mp4 is hosted cross-origin without CORS headers, ctx.getImageData will be blocked. To avoid that, make sure the video file is served from the same origin or served with CORS that allows reading.
-
-    // Initial setup if the user drags mouse early
-    canvas.addEventListener('mouseenter', (e) => { const { rect, scaleX, scaleY } = getCanvasScale(); });
-
-    // Update canvas size once metadata is ready
-    video.addEventListener('loadedmetadata', () => {
-      setupCanvasSize();
-    });
-
-    // If video ends naturally, let loop handle the win state; also attach ended event as backup
-    video.addEventListener('ended', () => { if (isPlaying) endGame(true); });
-
-    // show a helpful tip overlay before starting
-    // (Already handled by startBtn)
-
-    // Prevent context menu on canvas for polish
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
-
   </script>
 </body>
 </html>
